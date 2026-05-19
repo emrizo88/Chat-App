@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="chat-body">
+
+<div class="chat-layout">
+
+    <!-- Sidebar izquierdo — rooms -->
+    <div class="chat-sidebar">
+        <div class="chat-sidebar-header">
+            <div class="d-flex align-items-center gap-2">
+                <div class="usuario-avatar-chat">
+                    <span id="username-display">👤</span>
+                </div>
+                <span class="fw-bold">Chat App</span>
+            </div>
+            <button class="btn-nuevo-room" id="btn-nuevo-room" 
+                data-bs-toggle="modal" 
+                data-bs-target="#modalRoom"
+                title="Nueva sala">+</button>
+        </div>
+
+        <div class="chat-search">
+            <input type="text" id="search-rooms" placeholder="Buscar sala..." class="form-control form-control-sm">
+        </div>
+
+        <div class="rooms-lista" id="rooms-lista">
+            <!-- rooms se cargan aquí -->
+        </div>
+    </div>
+
+    <!-- Panel derecho — mensajes -->
+    <div class="chat-main">
+
+        <!-- Estado vacío -->
+        <div class="chat-vacio" id="chat-vacio">
+            <div style="background:#25D366; width:80px; height:80px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 1rem;">
+                <span style="font-size:3rem;">💬</span>
+            </div>
+            <h4 class="fw-bold">Chat App</h4>
+            <p class="text-muted">Selecciona una sala para empezar</p>
+        </div>
+
+        <!-- Chat activo -->
+        <div class="chat-activo d-none" id="chat-activo">
+            <div class="chat-header">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="room-avatar">💬</div>
+                    <div>
+                        <div class="fw-bold" id="room-nombre">Sala</div>
+                        <small class="text-muted" id="room-creador"></small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-mensajes" id="chat-mensajes"></div>
+
+            <div class="chat-input-area">
+                <form id="formulario" class="d-flex gap-2">
+                    <input type="text" id="input" class="form-control" placeholder="Escribe un mensaje..." autocomplete="off">
+                    <button type="submit" class="btn-enviar">➤</button>
+                </form>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Modal nuevo room -->
+<div class="modal fade" id="modalRoom" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="border-radius:16px;">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold">Nueva sala</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form action="/rooms/create" method="POST">
+                    <div class="mb-4">
+                        <label class="form-label text-muted small">NOMBRE DE LA SALA</label>
+                        <input type="text" name="nombre" class="form-control" placeholder="Ej. General, Trabajo..." required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Crear sala</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    const socket = io()
+    let roomActual = null
+    let userId = null
+    let username = null
+
+    // Cargar info del usuario
+    async function cargarUsuario() {
+        const res = await fetch('/api/me')
+        const data = await res.json()
+        userId = data.id
+        username = data.username
+        document.getElementById('username-display').textContent = username[0].toUpperCase()
+    }
+
+    // Cargar rooms
+    async function cargarRooms() {
+        const res = await fetch('/api/rooms')
+        const rooms = await res.json()
+        const lista = document.getElementById('rooms-lista')
+        lista.innerHTML = ''
+        rooms.forEach(room => {
+            const div = document.createElement('div')
+            div.classList.add('room-item')
+            div.innerHTML = `
+                <div class="room-avatar-sm">💬</div>
+                <div>
+                    <div class="fw-semibold">${room.nombre}</div>
+                    <small class="text-muted">Creado por ${room.creado_por}</small>
+                </div>
+            `
+            div.addEventListener('click', () => entrarRoom(room))
+            lista.appendChild(div)
+        })
+    }
+
+    // Entrar a un room
+    async function entrarRoom(room) {
+        // Actualizar UI
+        document.getElementById('chat-vacio').classList.add('d-none')
+        document.getElementById('chat-activo').classList.remove('d-none')
+        document.getElementById('room-nombre').textContent = room.nombre
+        document.getElementById('room-creador').textContent = 'Creado por ' + room.creado_por
+
+        // Marcar room activo en sidebar
+        document.querySelectorAll('.room-item').forEach(r => r.classList.remove('activo'))
+        event.currentTarget.classList.add('activo')
+
+        roomActual = room.id
+
+        // Unirse via socket
+        socket.emit('unirse', { username, roomId: room.id })
+
+        // Cargar mensajes anteriores
+        const res = await fetch(`/api/rooms/${room.id}/mensajes`)
+        const mensajes = await res.json()
+        const contenedor = document.getElementById('chat-mensajes')
+        contenedor.innerHTML = ''
+        mensajes.forEach(m => agregarMensaje(m.username, m.texto, m.username === username))
+    }
+
+    // Agregar mensaje al chat
+    function agregarMensaje(nombre, texto, esMio) {
+        const contenedor = document.getElementById('chat-mensajes')
+        const div = document.createElement('div')
+        div.classList.add('mensaje-wrapper', esMio ? 'mio' : 'otro')
+        div.innerHTML = `
+            <div class="mensaje-burbuja">
+                ${!esMio ? `<small class="mensaje-nombre">${nombre}</small>` : ''}
+                <p class="mb-0">${texto}</p>
+            </div>
+        `
+        contenedor.appendChild(div)
+        contenedor.scrollTop = contenedor.scrollHeight
+    }
+
+    // Enviar mensaje
+    document.getElementById('formulario').addEventListener('submit', (e) => {
+        e.preventDefault()
+        const input = document.getElementById('input')
+        if (input.value && roomActual) {
+            socket.emit('mensaje', {
+                userId,
+                username,
+                roomId: roomActual,
+                texto: input.value
+            })
+            input.value = ''
+        }
+    })
+
+    // Recibir mensaje
+    socket.on('mensaje', (data) => {
+        if (roomActual) {
+            agregarMensaje(data.nombre, data.mensajes, data.nombre === username)
+        }
+    })
+
+    // Inicializar
+    cargarUsuario()
+    cargarRooms()
+</script>
+
+</body>
+</html>
