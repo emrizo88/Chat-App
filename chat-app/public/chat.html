@@ -50,14 +50,28 @@
         <!-- Chat activo -->
         <div class="chat-activo d-none" id="chat-activo">
             <div class="chat-header">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="room-avatar">💬</div>
-                    <div>
-                        <div class="fw-bold" id="room-nombre">Sala</div>
-                        <small class="text-muted" id="room-creador"></small>
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="room-avatar">💬</div>
+                        <div>
+                            <div class="fw-bold" id="room-nombre">Sala</div>
+                            <small class="text-muted" id="room-creador"></small>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn-video" id="btn-video" title="Unirse a videollamada">
+                            📹
+                        </button>
                     </div>
                 </div>
             </div>
+
+            <div class="video-area d-none" id="video-area">
+                <div class="videos-grid" id="videos-grid">
+                    <video id="mi-video" autoplay muted playsinline></video>
+                </div>
+            </div>
+
 
             <div class="chat-mensajes" id="chat-mensajes"></div>
 
@@ -100,6 +114,182 @@
     let roomActual = null
     let userId = null
     let username = null
+
+    // Funcionalidades Streaming
+    let miStream = null
+    let connections = {}
+    let inCall = false
+
+    async function iniciarVideo(){
+        try{
+            miStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true})
+            document.getElementById('mi-video').srcObject = miStream
+        }catch(error){
+            console.log(error)
+        }
+    }
+
+    document.getElementById('btn-video').addEventListener('click', async ()=>{
+        document.getElementById('video-area').classList.remove('d-none')
+        await iniciarVideo()
+        inCall = true
+
+        socket.emit('unirse-video', ({ roomId: roomActual }))
+    })
+
+    function crearConexion(socketId){
+        if (connections[socketId]) return
+        try{
+            connections[socketId] = new RTCPeerConnection({
+                iceServers: [
+                    {urls: 'stun:stun.l.google.com:19302'},
+                    {urls: 'stun:stun.l.google.com:19302'}
+                ]
+            })
+
+            connections[socketId].onconnectionstatechange = () => {
+                console.log('connections state: ', connections[socketId].connectionState)
+            }
+
+            connections[socketId].oniceconnectionstatechange = () => {
+                console.log('ICE state: ', connections[socketId].iceConnectionState)
+                console.log('ICE gathering: ', connections[socketId].iceGatheringState)
+            }
+
+            connections[socketId].onicegatheringstatechange = () => {
+                console.log('gathering state: ', connections[socketId].iceGatheringState)
+            }
+
+            miStream.getTracks().forEach(track => {
+                connections[socketId].addTrack(track,miStream)
+            })
+
+            connections[socketId].ontrack = (event) => {
+                console.log('track kind:', event.track.kind)
+
+                if (event.track.kind === 'audio') return
+
+                if (document.getElementById('video-'+ socketId)) return
+                
+                document.getElementById('video-area').classList.remove('d-none')
+                const video = document.createElement('video')
+                video.id = 'video-' + socketId
+                video.autoplay = true
+                video.playsinline = true
+                video.style.width = '200px'
+                video.style.height = '150px'
+                video.style.objectFit = 'cover'
+                video.style.borderRadius = '8px'
+                video.style.background = '#2d2d2d' 
+                video.muted = false
+                video.onloadedmetadata = () => {
+                    console.log('metadata cargada: ', video.videoWidth, video.videoHeight)
+                    video.play().catch(e => console.log('Error:', e))
+                }
+                video.onerror = (e) => {
+                    console.log('Error en video: ', e)
+                }
+
+                video.onstalled =() => {
+                    console.log('video estancado')
+                }
+                video.onplaying = () => {
+                    console.log('video reproduciendo')
+                }
+                document.getElementById('videos-grid').appendChild(video)
+                const videoTrack = event.streams[0].getVideoTracks()[0]
+                console.log('track muted: ', videoTrack.muted)
+
+                videoTrack.onunmute = () => {
+                    video.srcObject = event.streams[0]
+                }
+                video.srcObject = event.streams[0]
+            
+                console.log('video agregado, dimensiones: ',video.videoWidth, video.videoHeight)
+            }
+
+            connections[socketId].onicecandidate = (event) => {
+                if (event.candidate){
+                    console.log('generando candidate: ', event.candidate.type, event.candidate.protocol)
+                    socket.emit('icecandidates',{
+                        roomId: roomActual,
+                        candidate: {
+                            candidate: event.candidate.candidate,
+                            sdpMid: event.candidate.sdpMid,
+                            sdpMLineIndex: event.candidate.sdpMLineIndex
+                        }
+                    })
+                } else{
+                    console.log('ICE Gathering Complete')
+                }
+            }
+        }catch(error){
+            console.log(error)
+        }
+    }
+
+    async function crearOferta(socketId){
+        if (connections[socketId]) return
+        crearConexion(socketId)
+        const offer = await connections[socketId].createOffer()
+        await connections[socketId].setLocalDescription(offer)
+        console.log('Oferta creada: ', offer)
+        socket.emit('oferta',{
+            roomId: roomActual,
+            oferta: offer
+        })
+    }
+
+    async function manejarOferta(socketId, oferta) {
+        console.log('oferta llegó de:', socketId, '| conexión existe:', !!connections[socketId])
+        if (connections[socketId]) return
+        if (!miStream){
+            await iniciarVideo()
+            document.getElementById('video-area').classList.remove('d-none')
+        }
+        crearConexion(socketId)
+        await connections[socketId].setRemoteDescription(oferta)
+        const answer = await connections[socketId].createAnswer()
+        await connections[socketId].setLocalDescription(answer)
+        socket.emit('respuesta', {
+            roomId: roomActual,
+            respuesta: answer,
+            para: socketId
+        })
+    
+        // Procesa candidates pendientes
+        if (iceCandidatesPendientes[socketId]) {
+            for (const candidate of iceCandidatesPendientes[socketId]) {
+                await connections[socketId].addIceCandidate(new RTCIceCandidate(candidate))
+            }
+            delete iceCandidatesPendientes[socketId]
+        }
+    }
+    async function manejarRespuesta(socketId,respuesta){
+        await connections[socketId].setRemoteDescription(respuesta)
+
+        if (iceCandidatesPendientes[socketId]){
+            for (const candidate of iceCandidatesPendientes[socketId]){
+                await connections[socketId].addIceCandidate(new RTCIceCandidate(candidate))
+            }
+            delete iceCandidatesPendientes[socketId]
+        }
+    }
+
+    let iceCandidatesPendientes = {}
+
+    async function manejarIceCandidates(socketId, candidate){
+        if (!connections[socketId] || connections[socketId].remoteDescription == null){
+            if (!iceCandidatesPendientes[socketId]){
+                iceCandidatesPendientes[socketId] = []
+            }
+            iceCandidatesPendientes[socketId].push(candidate)
+            return
+        }
+        await connections[socketId].addIceCandidate(new RTCIceCandidate(candidate))
+        console.log('candidate agregado, ICE state: ',connections[socketId].iceConnectionState)
+    }
+
 
     // Cargar info del usuario
     async function cargarUsuario() {
@@ -191,6 +381,29 @@
         if (roomActual) {
             agregarMensaje(data.nombre, data.mensajes, data.nombre === username)
         }
+    })
+
+    socket.on('oferta', (data) => {
+        console.log('oferta recibida de: ', data.de)
+        manejarOferta(data.de, data.oferta)
+    })
+
+    socket.on('respuesta', (data) => {
+        console.log('respuesta recibida de: ', data.de)
+        manejarRespuesta(data.de, data.respuesta)
+    })
+
+    socket.on('icecandidates', (data) => {
+        manejarIceCandidates(data.de, data.candidate)
+    })
+
+    socket.on('nuevo-en-video', async (data) => {
+        console.log('nuevo-en-video recibido de: ',data.de)
+        if (!inCall) return
+        if (!miStream){
+            await IniciarVideo()
+        }
+        crearOferta(data.de)
     })
 
     // Inicializar

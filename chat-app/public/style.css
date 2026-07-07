@@ -392,3 +392,44 @@ body.login-body {
 .btn-enviar:hover {
     background: #20b858;
 }
+
+.video-area {
+    background: #1a1a2e;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.videos-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.videos-grid video {
+    width: 200px;
+    height: 150px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: #2d2d2d;
+}
+
+.btn-video {
+    background: none;
+    border: none;
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 8px;
+    transition: background 0.15s;
+}
+
+.btn-video:hover {
+    background: #e9ecef;
+}
+
+.btn-video.activo {
+    background: #e74c3c;
+}

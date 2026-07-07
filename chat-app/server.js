@@ -1,11 +1,16 @@
 const express = require('express')
-const http = require('http')
+const https = require('https')
+const fs = require('fs')
+const credentials = {
+    key: fs.readFileSync('192.168.1.X+2-key.pem'),
+    cert: fs.readFileSync('192.168.1.X+2.pem')
+}
 const { Server } = require('socket.io')
 const session = require('express-session')
 const { registrarUsuario, obtenerUsuario, obtenerUsuarioPorId, crearRoom, obtenerRoomPorId, obtenerRooms, unirseARoom, guardarMensaje, obtenerMensajesPorRoom } = require('./database')
 // io es para todos, socket es para un usuario en especifico
 const app = express()
-const server = http.createServer(app)
+const server = https.createServer(credentials,app)
 const io = new Server(server)
 const bcrypt = require('bcrypt')
 
@@ -114,7 +119,7 @@ app.get('/logout', (req, res) => {
 })
 
 server.listen(3000, () => {
-    console.log('Servidor corriendo en http://localhost:3000')
+    console.log('Servidor corriendo en https://localhost:3000')
 })
 
 usuarios_per_room = {}
@@ -146,6 +151,14 @@ io.on('connection', (socket) => {
         })
     })
 
+    socket.on('unirse-video', (data) => {
+        console.log('Unirse-video recibido de: ', socket.id, 'room: ', data.roomId)
+        socket.to(data.roomId).emit('nuevo-en-video', {
+            de:socket.id
+        })
+    })
+
+
     socket.on('disconnect', () =>{
         socket.broadcast.to(socket.room).emit('mensaje',{
             nombre: 'Sistema',
@@ -156,6 +169,29 @@ io.on('connection', (socket) => {
         }
         usuarios_per_room[socket.room] = usuarios_per_room[socket.room].filter(u => u !== socket.nombre)
         console.log(socket.nombre + ' ha salido de la sala.')
+    })
+
+    socket.on('oferta', (data) => {
+        socket.to(data.roomId).emit('oferta', {
+            oferta: data.oferta,
+            de: socket.id
+        })
+    })
+
+    socket.on('respuesta', (data) => {
+        console.log('respuesta en servidor, para: ', data.para)
+        socket.to(data.para).emit('respuesta',{
+            respuesta: data.respuesta,
+            de: socket.id
+        })
+    })
+
+    socket.on('icecandidates', (data) => {
+        console.log('candidate recibido en servidor de: ',socket.id)
+        socket.to(data.roomId).emit('icecandidates',{
+            candidate: data.candidate,
+            de: socket.id
+        })
     })
 })
 
