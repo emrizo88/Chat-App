@@ -1,16 +1,11 @@
 const express = require('express')
-const https = require('https')
-const fs = require('fs')
-const credentials = {
-    key: fs.readFileSync('192.168.1.X+2-key.pem'),
-    cert: fs.readFileSync('192.168.1.X+2.pem')
-}
+const http = require('http')
 const { Server } = require('socket.io')
 const session = require('express-session')
 const { registrarUsuario, obtenerUsuario, obtenerUsuarioPorId, crearRoom, obtenerRoomPorId, obtenerRooms, unirseARoom, guardarMensaje, obtenerMensajesPorRoom } = require('./database')
 // io es para todos, socket es para un usuario en especifico
 const app = express()
-const server = https.createServer(credentials,app)
+const server = http.createServer(app)
 const io = new Server(server)
 const bcrypt = require('bcrypt')
 
@@ -119,7 +114,7 @@ app.get('/logout', (req, res) => {
 })
 
 server.listen(3000, () => {
-    console.log('Servidor corriendo en https://localhost:3000')
+    console.log('Servidor corriendo en http://localhost:3000')
 })
 
 usuarios_per_room = {}
